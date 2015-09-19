@@ -5,10 +5,10 @@
 Simulation with a simple visulization; make sure you have gnuplot installed;
 This simulation is very slow because of too many I/O's.
 
-
 * RFIM1.cc
 Simulation with only data output.
 Two files are exported to folder ".\data". 
+------------------------------------
 1. spin_L32_T1.0_r200_sqT.csv
 Spin configurations at different MC steps.
 "L32" means system length 32;
