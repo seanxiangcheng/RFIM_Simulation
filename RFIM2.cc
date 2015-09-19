@@ -52,7 +52,7 @@ using namespace std;
 #define NAME_LEN 8
 #define DIM 2
 #define JCON -1
-#define RECORD_LEN 100
+#define RECORD_LEN 1000
 #define FILE_NAME_LEN 64
 
 gsl_rng *rnd = gsl_rng_alloc(gsl_rng_mt19937); // global random number setup
@@ -65,6 +65,7 @@ class RFIM2d {
     double *his;  // static internal random field 
     double T;     // temperature
     double E;     // energy
+    int Espin;    // energy without random field
     int M;        // magnetization
     
   public:
@@ -75,6 +76,7 @@ class RFIM2d {
     int get_M() { return(M);} // get M
     int *get_spins() {return(spins);} // get 
     double get_E() { return(E); }
+    int get_Espin() { return(Espin); }
     double get_T() { return(T); }
     int initialize();  // initialization with default values
     int *neighbors(int iv); //
@@ -86,6 +88,7 @@ class RFIM2d {
     int set_his ();
     double calc_E();
     int calc_M();
+    int calc_Espin();
     int print_info(int config);
     int update();
 };
@@ -103,12 +106,30 @@ double RFIM2d::calc_E()
         {
             energy_s = energy_s + JCON * spins[i] * spins[ng[j]];   
         }
-        energy_h = energy_h + his[i] * spins[i];
+        energy_h = energy_h - his[i] * spins[i];
     }
     energy = energy_s / 2.0 + energy_h;
     
     return(energy);
 }
+
+int RFIM2d::calc_Espin()
+{
+    double energy_s = 0;
+    int *ng; 
+    for (int i = 0; i < N; i++)
+    {
+        ng = neighbors(i);
+        for (int j = 0; j < 2*DIM; j++)
+        {
+            energy_s = energy_s + JCON * spins[i] * spins[ng[j]];   
+        }
+    }
+    energy_s = energy_s / 2.0;
+    
+    return(energy_s);
+}
+
 
 int RFIM2d::calc_M()
 {
@@ -120,17 +141,21 @@ int RFIM2d::calc_M()
     return(mag);
 }
 
+
 int RFIM2d::check_E()
 {
     double energy = calc_E();
-    if((energy - E) < 1e-12)
+    int espin = calc_Espin();
+    if((energy - E) < 1e-12 && (espin-Espin) < 1e-12)
     {
-        cout << "  Energy is correct: E = calc_energy = " << energy << endl;
+        cout << "  Energy is correct: E=" << energy << "; Espin=" << Espin << endl;
     }
     else
     {
         cout << "  Energy is wrong: E = " << E << endl;
         cout << "  But --------calc_E = " << energy << endl;
+        cout << "  Energy is wrong: Espin = " << Espin << endl;
+        cout << "  But --------calc_Espin = " << espin << endl;
         E = energy;
     }
     return(0);
@@ -203,6 +228,7 @@ int RFIM2d::initialize()
     set_his();
     
     E = calc_E();
+    Espin = calc_Espin();
     M = calc_M();
     return(1);
 }
@@ -270,16 +296,19 @@ int RFIM2d::update()
     site = N*gsl_rng_uniform(rnd);
     //printf("site:%d\n", site);//del
     double dE = 0.0;
+    int dEspin = 0;
     int *ng = neighbors(site);
     for (int i=0; i < 2*DIM; i++)
     {
         dE = dE - 2.0 * JCON * spins[site] * spins[ng[i]];
     }
-    dE = dE - 2.0 * his[site] * spins[site];  //??????
+    dEspin = (int)dE;
+    dE = dE + 2.0 * his[site] * spins[site];  //??????
     if(dE < 0.0 || gsl_rng_uniform(rnd) < exp(-(dE + gsl_ran_gaussian(rnd, sqrt(T))*spins[site])/T))
     {
         spins[site] = -spins[site];
         E = E + dE;
+        Espin += dEspin;
         M = M + 2*spins[site];
     }
     return(1);
@@ -331,14 +360,22 @@ int set_record_steps(double *rand_steps_record, double total_MCs, int N)
     return(1);
 }
 
-int set_file_name(char *newname, char *name0, char *name1, RFIM2d *age)
+int set_file_name(char *newname, const char *name0, char *name1, RFIM2d *age, int rep)
 {
     int i = 0;
-    int *nm;
+    //int *nm;
+    char buf[32] = "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
     for(i = 0; i < FILE_NAME_LEN; i++)
         newname[i]='\0';
+    strcat(newname, "./data/");
+    strcat(newname, name0);
+    sprintf(buf,"_L%d_T%.1f_r%d_", age->get_L(), age->get_T(), rep);
+    strcat(newname, buf);
+    strcat(newname, name1);
+    strcat(newname, ".csv");
     
-  
+    //cout << "newname: " <<newname << endl; 
+    return(1);
 }
 
 
@@ -400,21 +437,22 @@ int main (int argc, char *argv[])
     for(int i=0; i <= NAME_LEN; i++) {name[i] = '\0';}
     double total_MCs = 100.0, total_rnd_steps = 0.0, total_rnd_steps_ran=0.0;
     double rand_steps_record[RECORD_LEN];
-    double mag_steps[RECORD_LEN], energy_steps[RECORD_LEN];
+    double mag_steps[RECORD_LEN], energy_steps[RECORD_LEN], domlen_steps[RECORD_LEN];
     int m_e_ind = 0; // index to record which element of mag_steps[] to store the mag (same thing for energy)
     for (i = 0; i < RECORD_LEN; i++)
     {
         mag_steps[i] = 0.0;
         energy_steps[i] = 0.0;
+        domlen_steps[i] = 0.0;
     }
     
-    char spin_fn[FILE_NAME_LEN], mag_fn[FILE_NAME_LEN], energy_fn[FILE_NAME_LEN], dom_len[FILE_NAME_LEN]; // output filenames
-    
+    char spin_fn[FILE_NAME_LEN], MED_fn[FILE_NAME_LEN];// mag_fn[FILE_NAME_LEN], energy_fn[FILE_NAME_LEN], dom_len_fn[FILE_NAME_LEN]; // output filenames
     Commandlineparse(argc, argv, &age, &total_MCs, &repeat_num, &seed, name);
     gsl_rng_set(rnd, (unsigned long int)seed); // set up random seed before initialize()
     total_rnd_steps = total_MCs * age.get_N();
     age.initialize();
-    printf("total_MC=%.2f; repeat_num=%d; seed=%d; name=%s (len=%d)\n", total_MCs, repeat_num, seed, name, (int)strlen(name));
+    int gs_e = -age.get_N() * 2;
+    printf("L=%d;total_MC=%.2f; repeat_num=%d; seed=%d; name=%s (len=%d)\n", age.get_L(), total_MCs, repeat_num, seed, name, (int)strlen(name));
     // Test input:
     age.print_info();
     //age.neighbor_check(15);
@@ -423,11 +461,14 @@ int main (int argc, char *argv[])
     
     set_record_steps(rand_steps_record, total_MCs, age.get_N());
 
-    set_file_name(spin_fn, "spin", name, &age);
+    set_file_name(spin_fn, "spin", name, &age, repeat_num);
+    //set_file_name(mag_fn, "mage", name, &age, repeat_num);
+    //set_file_name(energy_fn, "ener", name, &age, repeat_num);
+    //set_file_name(dom_len_fn, "doma", name, &age, repeat_num);
+    set_file_name(MED_fn, "MED", name, &age, repeat_num);
     
-    
-    ofstream out; 
-    out.open("spins.csv"); 
+    FILE *fp;
+    fp = fopen(spin_fn, "w"); 
     for (iter = 0; iter < repeat_num; iter++)
     {
         /*********** System Initialization *************/
@@ -443,16 +484,17 @@ int main (int argc, char *argv[])
                 //printf("%d : %.2f\n", m_e_ind, rand_steps_record[m_e_ind]);
                 mag_steps[m_e_ind] += age.get_M();
                 energy_steps[m_e_ind] += age.get_E();
+                domlen_steps[m_e_ind] += (age.get_Espin() - gs_e) / 2.0;
                 m_e_ind++;
                 if(iter == repeat_num-1)
                 {
                     spins = age.get_spins();
-                    out << rand_steps_record[m_e_ind];
+                    fprintf(fp, "%.4f", rand_steps_record[m_e_ind]/age.get_N());
                     for (i = 0; i < age.get_N(); i++)
                     {
-                        out<< "," << spins[i];
+                        fprintf(fp,  ",%-2d", spins[i]);
                     }
-                    out << "\n";
+                    fprintf(fp, "\n");
                 }
             }
             age.update();            
@@ -462,33 +504,34 @@ int main (int argc, char *argv[])
         //out.clear();  
         //age.check_E();
         //age.check_M();
-
+        if(repeat_num>20)
+        {
+            if( iter%(repeat_num/20)==0 )
+                printf("   %.2f%% completed\n", (double)iter/repeat_num*100);
+        }
+        else
+            printf("   %.2f%% completed\n", (double)iter/repeat_num*100);
     }
-    out.close();
+    
+    fclose(fp);
+    printf("\n\n   Simulation is Done!\n");
+
     /**************** Output ***********************/
     //getchar(); //This line keeps the gnuplot window open after the code runs through.
-    
-    
-    printf("\n\n   Simulation is Done!\n");
+    fp=fopen(MED_fn, "w");
+    fprintf(fp, "2D FM Ising; L=%d; T=%.2f; MC steps= %-.2e; repeat=%d; Final_E=%.2f; Final_M=%d\n",
+            age.get_L(), age.get_T(), total_MCs, repeat_num, age.get_E(), age.get_M());
+
+    fprintf(fp, "mc_step,mag,energy,domain_len\n");
+
+    for(i=0; i < RECORD_LEN; i++)
+    {
+        fprintf(fp, "%.0f,%.8f,%.8f,%.8f\n", rand_steps_record[i]/age.get_N(), 
+        (double)mag_steps[i]/repeat_num/age.get_N(), energy_steps[i]/repeat_num/age.get_N(), domlen_steps[i]/repeat_num);
+    }
+    fclose(fp);
     age.print_info();
+    printf("\n\n   Data Export is Done!\n");
+    
     return(0);
 }
-
-
-
-
-
-
-
-/* Neighbor test
-    int *de;
-    int ss[] = {1, 6, 9, 10};
-    for(i=0; i<4; i++)
-    {
-        de = age.neighbors(ss[i]);
-        for(j=0; j<2*DIM; j++)
-        {
-            printf(" %-3d:%-3d\n", ss[i], de[j]);
-        }
-    }
-    */
