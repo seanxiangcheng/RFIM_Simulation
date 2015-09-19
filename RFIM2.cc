@@ -52,8 +52,8 @@ using namespace std;
 #define NAME_LEN 8
 #define DIM 2
 #define JCON -1
-#define RECORD_LEN 1000
-#define FILE_NAME_LEN 64
+#define RECORD_LEN 2000
+#define FILE_NAME_LEN 128
 
 gsl_rng *rnd = gsl_rng_alloc(gsl_rng_mt19937); // global random number setup
 
@@ -75,6 +75,8 @@ class RFIM2d {
     int get_N() { return(N);} // get N
     int get_M() { return(M);} // get M
     int *get_spins() {return(spins);} // get 
+    double get_s_hi() {return(s_hi);}
+    double get_s_Hi() {return(sqrt(T));}
     double get_E() { return(E); }
     int get_Espin() { return(Espin); }
     double get_T() { return(T); }
@@ -277,8 +279,8 @@ int RFIM2d::print_info(int config=0)
         return(0);
     }
     printf("*** Simulation System Information ***\n");
-    printf("   L=%d; N=%d;\n   T=%.2f; hi_sigma=%.2f\n   E=%.2f; M=%d;\n"\
-    , L, N, T, s_hi, E, M);
+    printf("   L=%d; N=%d;\n   T=%.2f; hi_sigma=%.2f Hi_s=%.2f\n   E=%.2f; M=%d;\n"\
+    , L, N, T, s_hi, get_s_Hi(), E, M);
     if(config != 0)
     {
         printf("   ** Configurations **\n");
@@ -326,7 +328,7 @@ int set_record_steps(double *rand_steps_record, double total_MCs, int N)
         return(0);
     }
     
-    interval = total_MCs*N/RECORD_LEN;
+    interval = total_MCs*1.0*N/RECORD_LEN;
     if(total_MCs <= RECORD_LEN)
     {
         for (i = 0; i < RECORD_LEN; i++)
@@ -342,7 +344,7 @@ int set_record_steps(double *rand_steps_record, double total_MCs, int N)
         }
         for (i = RECORD_LEN/2; i < RECORD_LEN; i++)
         {
-            rand_steps_record[i] = floor(interval*1.5 * i);
+            rand_steps_record[i] = rand_steps_record[i-1] + interval*1.5;
         }
     }
     else
@@ -369,7 +371,7 @@ int set_file_name(char *newname, const char *name0, char *name1, RFIM2d *age, in
         newname[i]='\0';
     strcat(newname, "./data/");
     strcat(newname, name0);
-    sprintf(buf,"_L%d_T%.1f_r%d_", age->get_L(), age->get_T(), rep);
+    sprintf(buf,"_L%d_T%.1f_shi%.1f_sHi%.2f_r%d_", age->get_L(), age->get_T(), age->get_s_hi(), age->get_s_Hi(), rep);
     strcat(newname, buf);
     strcat(newname, name1);
     strcat(newname, ".csv");
@@ -385,6 +387,9 @@ void Commandlineparse(int argc, char **argv, RFIM2d *age, double *total_MCs, int
 {
   	int i;
   	*seed = getpid();
+    age->set_s_hi(); // set to default values first
+    age->set_T(); // set to default values first
+    age->set_L(); // set to default values first
   	for (i = 1; i < argc; i++)
     {   //Start at i = 1 to skip the command name.
     		if (argv[i][0] == '-')
@@ -452,7 +457,7 @@ int main (int argc, char *argv[])
     total_rnd_steps = total_MCs * age.get_N();
     age.initialize();
     int gs_e = -age.get_N() * 2;
-    printf("L=%d;total_MC=%.2f; repeat_num=%d; seed=%d; name=%s (len=%d)\n", age.get_L(), total_MCs, repeat_num, seed, name, (int)strlen(name));
+    printf("L=%d; T=%.2f; total_MC=%.2f; repeat_num=%d; seed=%d; name=%s (len=%d)\n", age.get_L(), age.get_T(),total_MCs, repeat_num, seed, name, (int)strlen(name));
     // Test input:
     age.print_info();
     //age.neighbor_check(15);
@@ -485,17 +490,20 @@ int main (int argc, char *argv[])
                 mag_steps[m_e_ind] += age.get_M();
                 energy_steps[m_e_ind] += age.get_E();
                 domlen_steps[m_e_ind] += (age.get_Espin() - gs_e) / 2.0;
-                m_e_ind++;
                 if(iter == repeat_num-1)
                 {
-                    spins = age.get_spins();
-                    fprintf(fp, "%.4f", rand_steps_record[m_e_ind]/age.get_N());
-                    for (i = 0; i < age.get_N(); i++)
+                    if(m_e_ind < 10 || (m_e_ind<100 && m_e_ind%10==0)||m_e_ind%200==0)
                     {
-                        fprintf(fp,  ",%-2d", spins[i]);
+                        spins = age.get_spins();
+                        fprintf(fp, "%.4f", total_rnd_steps_ran/age.get_N());
+                        for (i = 0; i < age.get_N(); i++)
+                        {
+                            fprintf(fp,  ",%-2d", spins[i]);
+                        }
+                        fprintf(fp, "\n");
                     }
-                    fprintf(fp, "\n");
                 }
+                m_e_ind++;
             }
             age.update();            
             total_rnd_steps_ran += 1.0;
@@ -519,8 +527,8 @@ int main (int argc, char *argv[])
     /**************** Output ***********************/
     //getchar(); //This line keeps the gnuplot window open after the code runs through.
     fp=fopen(MED_fn, "w");
-    fprintf(fp, "2D FM Ising; L=%d; T=%.2f; MC steps= %-.2e; repeat=%d; Final_E=%.2f; Final_M=%d\n",
-            age.get_L(), age.get_T(), total_MCs, repeat_num, age.get_E(), age.get_M());
+    fprintf(fp, "2D FM Ising; L=%d; T=%.2f; s_hi=%.2f; s_Hi=%.2f; MC steps= %-.2e; repeat=%d; Final_E=%.2f; Final_M=%d;\n",
+            age.get_L(), age.get_T(), age.get_s_hi(),age.get_s_Hi(), total_MCs, repeat_num, age.get_E(), age.get_M());
 
     fprintf(fp, "mc_step,mag,energy,domain_len\n");
 
