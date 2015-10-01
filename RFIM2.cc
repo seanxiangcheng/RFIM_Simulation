@@ -41,7 +41,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <cstdio>
-#include<fstream>
+#include <fstream>
 
 using namespace std;
 
