@@ -42,6 +42,8 @@
 #include <unistd.h>
 #include <cstdio>
 #include <fstream>
+#include <dirent.h>
+#include <sys/stat.h>
 
 using namespace std;
 
@@ -376,6 +378,11 @@ int set_file_name(char *newname, const char *name0, char *name1, RFIM2d *age, in
     strcat(newname, name1);
     strcat(newname, ".csv");
     
+    DIR *dirp;
+    if (!(dirp = opendir("./data"))) { /* open the directory */
+        mkdir("./data", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+    }
+    closedir(dirp);
     //cout << "newname: " <<newname << endl; 
     return(1);
 }
