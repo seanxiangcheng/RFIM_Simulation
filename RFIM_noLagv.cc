@@ -54,7 +54,7 @@ using namespace std;
 #define NAME_LEN 8
 #define DIM 2
 #define JCON -1
-#define RECORD_LEN 3000
+#define RECORD_LEN 5000
 #define FILE_NAME_LEN 128
 
 gsl_rng *rnd = gsl_rng_alloc(gsl_rng_mt19937); // global random number setup
